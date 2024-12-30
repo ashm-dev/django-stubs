@@ -1,9 +1,11 @@
+from collections.abc import Iterable
 from typing import Any, ClassVar, Literal, TypeVar, overload
 
 from django.db import models
 from django.db.models.base import Model
 from django.db.models.expressions import Combinable
 from django.db.models.fields import BooleanField
+from typing_extensions import TypeAlias
 
 _T = TypeVar("_T", bound=Model)
 
@@ -32,7 +34,7 @@ class AbstractBaseUser(models.Model):
     def set_unusable_password(self) -> None: ...
     def has_usable_password(self) -> bool: ...
     def get_session_auth_hash(self) -> str: ...
-    def get_session_auth_fallback_hash(self) -> str: ...
+    def get_session_auth_fallback_hash(self) -> Iterable[str]: ...
     @classmethod
     def get_email_field_name(cls) -> str: ...
     @classmethod
@@ -41,3 +43,8 @@ class AbstractBaseUser(models.Model):
     @classmethod
     @overload
     def normalize_username(cls, username: Any) -> Any: ...
+
+# This is our "placeholder" type the mypy plugin refines to configured 'AUTH_USER_MODEL'
+# wherever it is used as a type. The most recognised example of this is (probably)
+# `HttpRequest.user`
+_UserModel: TypeAlias = AbstractBaseUser  # noqa: PYI047

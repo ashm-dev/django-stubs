@@ -1,6 +1,7 @@
 from typing import Final, Optional, Union
 
 from mypy.checker import TypeChecker
+from mypy.copytype import copy_type
 from mypy.nodes import (
     GDEF,
     CallExpr,
@@ -244,15 +245,18 @@ def _replace_type_var(ret_type: MypyType, to_replace: str, replace_by: MypyType)
     """
     if isinstance(ret_type, TypeVarType) and ret_type.fullname == to_replace:
         return replace_by
-    elif isinstance((instance := get_proper_type(ret_type)), Instance):
-        # Since it is an instance, recursively find the type var for all its args.
-        instance.args = tuple(_replace_type_var(item, to_replace, replace_by) for item in instance.args)
-        return instance
 
-    if isinstance(ret_type, ProperType) and hasattr(ret_type, "item"):
+    ret_type = copy_type(get_proper_type(ret_type))
+
+    if isinstance(ret_type, Instance):
+        # Since it is an instance, recursively find the type var for all its args.
+        ret_type.args = tuple(_replace_type_var(item, to_replace, replace_by) for item in ret_type.args)
+        return ret_type
+
+    if hasattr(ret_type, "item"):
         # For example TypeType has an item. find the type_var for this item
         ret_type.item = _replace_type_var(ret_type.item, to_replace, replace_by)
-    if isinstance(ret_type, ProperType) and hasattr(ret_type, "items"):
+    if hasattr(ret_type, "items"):
         # For example TypeList has items. find recursively type_var for its items
         ret_type.items = [_replace_type_var(item, to_replace, replace_by) for item in ret_type.items]
     return ret_type
@@ -507,19 +511,24 @@ def add_as_manager_to_queryset_class(ctx: ClassDefContext) -> None:
     base_as_manager = queryset_info.get("as_manager")
     if base_as_manager is None:
         return
-    base_as_manager_type = get_proper_type(base_as_manager.type)
-    if not isinstance(base_as_manager_type, CallableType):
-        return
-    base_as_manager_ret_type = get_proper_type(base_as_manager_type.ret_type)
-    if not isinstance(base_as_manager_ret_type, Instance):
-        return
 
-    base_ret_type = base_as_manager_ret_type.type
     manager_sym = semanal_api.lookup_fully_qualified_or_none(fullnames.MANAGER_CLASS_FULLNAME)
     if manager_sym is None or not isinstance(manager_sym.node, TypeInfo):
         return _defer()
 
     manager_base = manager_sym.node
+    base_ret_type = manager_base
+
+    if base_as_manager.fullname != f"{fullnames.QUERYSET_CLASS_FULLNAME}.as_manager":
+        base_as_manager_type = get_proper_type(base_as_manager.type)
+        if not isinstance(base_as_manager_type, CallableType):
+            return
+        base_as_manager_ret_type = get_proper_type(base_as_manager_type.ret_type)
+        if not isinstance(base_as_manager_ret_type, Instance):
+            return
+
+        base_ret_type = base_as_manager_ret_type.type
+
     manager_class_name = f"{manager_base.name}From{queryset_info.name}"
     current_module = semanal_api.modules[semanal_api.cur_mod_id]
     existing_sym = current_module.names.get(manager_class_name)

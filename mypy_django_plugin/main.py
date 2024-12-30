@@ -1,7 +1,7 @@
 import itertools
 import sys
 from functools import cached_property, partial
-from typing import Any, Callable, Dict, List, Optional, Tuple, Type
+from typing import Any, Callable, Optional
 
 from mypy.build import PRI_MED, PRI_MYPY
 from mypy.modulefinder import mypy_path
@@ -32,9 +32,9 @@ from mypy_django_plugin.transformers import (
     meta,
     orm_lookups,
     querysets,
-    request,
     settings,
 )
+from mypy_django_plugin.transformers.auth import get_user_model
 from mypy_django_plugin.transformers.functional import resolve_str_promise_attribute
 from mypy_django_plugin.transformers.managers import (
     add_as_manager_to_queryset_class,
@@ -70,7 +70,7 @@ class NewSemanalDjangoPlugin(Plugin):
         sys.path.extend(options.mypy_path)
         self.django_context = DjangoContext(self.plugin_config.django_settings_module)
 
-    def _get_current_queryset_bases(self) -> Dict[str, int]:
+    def _get_current_queryset_bases(self) -> dict[str, int]:
         model_sym = self.lookup_fully_qualified(fullnames.QUERYSET_CLASS_FULLNAME)
         if model_sym is not None and isinstance(model_sym.node, TypeInfo):
             bases = helpers.get_django_metadata_bases(model_sym.node, "queryset_bases")
@@ -79,7 +79,7 @@ class NewSemanalDjangoPlugin(Plugin):
         else:
             return {}
 
-    def _get_current_form_bases(self) -> Dict[str, int]:
+    def _get_current_form_bases(self) -> dict[str, int]:
         model_sym = self.lookup_fully_qualified(fullnames.BASEFORM_CLASS_FULLNAME)
         if model_sym is not None and isinstance(model_sym.node, TypeInfo):
             bases = helpers.get_django_metadata_bases(model_sym.node, "baseform_bases")
@@ -96,11 +96,11 @@ class NewSemanalDjangoPlugin(Plugin):
             return sym.node
         return None
 
-    def _new_dependency(self, module: str, priority: int = PRI_MYPY) -> Tuple[int, str, int]:
+    def _new_dependency(self, module: str, priority: int = PRI_MYPY) -> tuple[int, str, int]:
         fake_lineno = -1
         return (priority, module, fake_lineno)
 
-    def get_additional_deps(self, file: MypyFile) -> List[Tuple[int, str, int]]:
+    def get_additional_deps(self, file: MypyFile) -> list[tuple[int, str, int]]:
         # for settings
         if file.fullname == "django.conf" and self.django_context.django_settings_module:
             return [self._new_dependency(self.django_context.django_settings_module, PRI_MED)]
@@ -110,15 +110,14 @@ class NewSemanalDjangoPlugin(Plugin):
             return [self._new_dependency("typing"), self._new_dependency("django_stubs_ext")]
 
         # for `get_user_model()`
-        if self.django_context.settings:
-            if file.fullname == "django.contrib.auth" or file.fullname in {"django.http", "django.http.request"}:
-                auth_user_model_name = self.django_context.settings.AUTH_USER_MODEL
-                try:
-                    auth_user_module = self.django_context.apps_registry.get_model(auth_user_model_name).__module__
-                except LookupError:
-                    # get_user_model() model app is not installed
-                    return []
-                return [self._new_dependency(auth_user_module), self._new_dependency("django_stubs_ext")]
+        if file.fullname == "django.contrib.auth" or file.fullname in {"django.http", "django.http.request"}:
+            auth_user_model_name = self.django_context.settings.AUTH_USER_MODEL
+            try:
+                auth_user_module = self.django_context.apps_registry.get_model(auth_user_model_name).__module__
+            except LookupError:
+                # get_user_model() model app is not installed
+                return []
+            return [self._new_dependency(auth_user_module), self._new_dependency("django_stubs_ext")]
 
         # ensure that all mentioned to='someapp.SomeModel' are loaded with corresponding related Fields
         defined_model_classes = self.django_context.model_modules.get(file.fullname)
@@ -149,9 +148,6 @@ class NewSemanalDjangoPlugin(Plugin):
         ]
 
     def get_function_hook(self, fullname: str) -> Optional[Callable[[FunctionContext], MypyType]]:
-        if fullname == "django.contrib.auth.get_user_model":
-            return partial(settings.get_user_model_hook, django_context=self.django_context)
-
         info = self._get_typeinfo_or_none(fullname)
         if info:
             if info.has_base(fullnames.FIELD_FULLNAME):
@@ -166,13 +162,14 @@ class NewSemanalDjangoPlugin(Plugin):
         return None
 
     @cached_property
-    def manager_and_queryset_method_hooks(self) -> Dict[str, Callable[[MethodContext], MypyType]]:
+    def manager_and_queryset_method_hooks(self) -> dict[str, Callable[[MethodContext], MypyType]]:
         typecheck_filtering_method = partial(orm_lookups.typecheck_queryset_filter, django_context=self.django_context)
         return {
             "values": partial(querysets.extract_proper_type_queryset_values, django_context=self.django_context),
             "values_list": partial(
                 querysets.extract_proper_type_queryset_values_list, django_context=self.django_context
             ),
+            "alias": partial(querysets.extract_proper_type_queryset_annotate, django_context=self.django_context),
             "annotate": partial(querysets.extract_proper_type_queryset_annotate, django_context=self.django_context),
             "create": partial(init_create.redefine_and_typecheck_model_create, django_context=self.django_context),
             "filter": typecheck_filtering_method,
@@ -270,10 +267,6 @@ class NewSemanalDjangoPlugin(Plugin):
         if info and info.has_base(fullnames.PERMISSION_MIXIN_CLASS_FULLNAME) and attr_name == "is_superuser":
             return partial(set_auth_user_model_boolean_fields, django_context=self.django_context)
 
-        # Lookup of the 'request.user' attribute
-        if info and info.has_base(fullnames.HTTPREQUEST_CLASS_FULLNAME) and attr_name == "user":
-            return partial(request.set_auth_user_model_as_type_for_request_user, django_context=self.django_context)
-
         # Lookup of the 'user.is_staff' or 'user.is_active' attribute
         if info and info.has_base(fullnames.ABSTRACT_USER_MODEL_FULLNAME) and attr_name in ("is_staff", "is_active"):
             return partial(set_auth_user_model_boolean_fields, django_context=self.django_context)
@@ -299,8 +292,9 @@ class NewSemanalDjangoPlugin(Plugin):
             "django_stubs_ext.annotations.WithAnnotations",
         ):
             return partial(handle_annotated_type, fullname=fullname)
-        else:
-            return None
+        elif fullname == "django.contrib.auth.base_user._UserModel":
+            return partial(get_user_model, django_context=self.django_context)
+        return None
 
     def get_dynamic_class_hook(self, fullname: str) -> Optional[Callable[[DynamicClassDefContext], None]]:
         # Create a new manager class definition when a manager's '.from_queryset' classmethod is called
@@ -311,10 +305,15 @@ class NewSemanalDjangoPlugin(Plugin):
                 return create_new_manager_class_from_from_queryset_method
         return None
 
-    def report_config_data(self, ctx: ReportConfigContext) -> Dict[str, Any]:
+    def report_config_data(self, ctx: ReportConfigContext) -> dict[str, Any]:
         # Cache would be cleared if any settings do change.
-        return self.plugin_config.to_json()
+        extra_data = {}
+        # In all places we use '_UserModel' alias as a type we want to clear cache if
+        # AUTH_USER_MODEL setting changes
+        if ctx.id.startswith("django.contrib.auth") or ctx.id in {"django.http.request", "django.test.client"}:
+            extra_data["AUTH_USER_MODEL"] = self.django_context.settings.AUTH_USER_MODEL
+        return self.plugin_config.to_json(extra_data)
 
 
-def plugin(version: str) -> Type[NewSemanalDjangoPlugin]:
+def plugin(version: str) -> type[NewSemanalDjangoPlugin]:
     return NewSemanalDjangoPlugin

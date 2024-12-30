@@ -27,7 +27,7 @@
         booking = Booking()
         reveal_type(booking.id)  # N: Revealed type is "builtins.int"
         reveal_type(booking.time_range)  # N: Revealed type is "Any"
-        reveal_type(booking.some_decimal)  # N: Revealed type is "_decimal.Decimal"
+        reveal_type(booking.some_decimal)  # N: Revealed type is "decimal.Decimal"
     installed_apps:
         - myapp
     files:
@@ -171,7 +171,7 @@
             message = models.BinaryField()
         obj = EncodedMessage(b'\x010')
 
-        reveal_type(obj.message) # N: Revealed type is "Union[builtins.bytes, builtins.memoryview]"
+        reveal_type(obj.message) # N: Revealed type is "Union[builtins.bytes, builtins.memoryview[builtins.int]]"
 
 -  case: test_small_auto_field_class_presents_as_int
    main: |
