@@ -1,5 +1,5 @@
 # Dev tools:
-pre-commit==4.0.1
+pre-commit==4.1.0
 pytest==8.3.4
 pytest-mypy-plugins==3.2.0
 pytest-shard==0.1.2
@@ -7,10 +7,10 @@ pytest-shard==0.1.2
 # Django deps:
 psycopg2-binary
 Django==4.2.16; python_version < '3.10'
-Django==5.1.4; python_version >= '3.10'
+Django==5.1.5; python_version >= '3.10'
 -e ./ext
 -e .[redis,compatible-mypy,oracle]
 
 # Overrides:
-mypy==1.14.0
-pyright==1.1.391
+mypy==1.14.1
+pyright==1.1.392.post0
